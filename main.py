@@ -19,7 +19,7 @@ if __name__ == '__main__':
     @selector: 是否使用筛选特征
     @force: 结合selector使用
     """
-    model_main(model='stacking', selector=True, force=True)
+    model_main(model='stacking', selector=True, force=False)
 
     # automl 模型
     """

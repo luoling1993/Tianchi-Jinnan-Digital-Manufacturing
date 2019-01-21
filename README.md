@@ -2,7 +2,7 @@
 
 - [赛题介绍](https://tianchi.aliyun.com/competition/entrance/231695/introduction)
 - 线上成绩
-  - 由于数据量太少，异常值的波动影响较大，基于该框架下分数在0.00009-0.001之间波动
+  - 由于数据量太少，异常值的波动影响较大，基于该框架下分数在0.00009-0.0001之间波动
   - automl，tree_stacking，selector和blending之间的各种组合没有细测(因为评分次数过少)
   - 各种参数没有调优
 

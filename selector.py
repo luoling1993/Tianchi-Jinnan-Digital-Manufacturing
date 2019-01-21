@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import warnings
+
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -8,6 +10,8 @@ import xgboost as xgb
 from sklearn.metrics import make_scorer
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import cross_val_score
+
+warnings.filterwarnings('ignore')
 
 
 class Selector(object):
@@ -38,7 +42,7 @@ class Selector(object):
             "boosting_type": "gbdt",
             "num_leaves": 32,
             "max_depth": -1,
-            "learning_rate": 0.01,
+            "learning_rate": 0.05,
             "max_bin": 425,
             "objective": 'regression',
             "min_child_samples": 30,
@@ -46,6 +50,7 @@ class Selector(object):
             "subsample_freq": 1,
             "colsample_bytree": 0.9,
             "reg_alpha": 0.1,
+            'metric': 'mse',
             "seed": 2018,
             "n_jobs": 5,
             "verbose": -1

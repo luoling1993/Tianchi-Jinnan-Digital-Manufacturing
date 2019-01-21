@@ -8,9 +8,11 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.linear_model import BayesianRidge
+from sklearn.metrics import make_scorer
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.model_selection import RepeatedKFold
+from sklearn.model_selection import cross_val_score
 
 from selector import Selector
 
@@ -61,14 +63,19 @@ def lgb_model(train_data, test_data, params, n_fold=5):
 
         k_pred = gbm.predict(k_x_vali, num_iteration=gbm.best_iteration)
         lgb_oof[vali_index] = k_pred
-        k_mse = mean_squared_error(k_y_vali, k_pred)
-        print(f'lgb mse error is {k_mse}')
 
         preds = gbm.predict(test_x, num_iteration=gbm.best_iteration)
         preds_list.append(preds)
 
-    cv_mse_error = mean_squared_error(train_labels, lgb_oof)
+    fold_mse_error = mean_squared_error(train_labels, lgb_oof)
+    print(f'lgb fold mse error is {fold_mse_error}')
+
+    mse = make_scorer(mean_squared_error)
+    gbm = lgb.LGBMRegressor(**params)
+    cv_mse_error = cross_val_score(gbm, train_x, train_labels, scoring=mse, cv=5, n_jobs=5)
+    cv_mse_error = np.mean(cv_mse_error)
     print(f'lgb cv mse error is {cv_mse_error}')
+
     preds_columns = ['preds_{id}'.format(id=i) for i in range(n_fold)]
     preds_df = pd.DataFrame(data=preds_list)
     preds_df = preds_df.T
@@ -115,14 +122,19 @@ def xgb_model(train_data, test_data, params, n_fold=5):
 
         k_pred = gbm.predict(xgb.DMatrix(k_x_vali), ntree_limit=gbm.best_ntree_limit)
         xgb_oof[vali_index] = k_pred
-        k_mse = mean_squared_error(k_y_vali, k_pred)
-        print(f'xgb mse error is {k_mse}')
 
         preds = gbm.predict(xgb.DMatrix(test_x), ntree_limit=gbm.best_ntree_limit)
         preds_list.append(preds)
 
-    cv_mse_error = mean_squared_error(train_labels, xgb_oof)
+    fold_mse_error = mean_squared_error(train_labels, xgb_oof)
+    print(f'xgb fold mse error is {fold_mse_error}')
+
+    mse = make_scorer(mean_squared_error)
+    gbm = xgb.XGBRegressor(**params)
+    cv_mse_error = cross_val_score(gbm, train_x, train_labels, scoring=mse, cv=5, n_jobs=5)
+    cv_mse_error = np.mean(cv_mse_error)
     print(f'xgb cv mse error is {cv_mse_error}')
+
     preds_columns = ['preds_{id}'.format(id=i) for i in range(n_fold)]
     preds_df = pd.DataFrame(data=preds_list)
     preds_df = preds_df.T
@@ -150,20 +162,23 @@ def stacking_model(oof_list, prediction_list, labels, sample_ids):
         k_x_train = train_stack[train_index]
         k_y_train = labels.loc[train_index]
         k_x_vali = train_stack[vali_index]
-        k_y_vali = labels.loc[vali_index]
 
         gbm = BayesianRidge(normalize=True)
         gbm.fit(k_x_train, k_y_train)
 
         k_pred = gbm.predict(k_x_vali)
         stacking_oof[vali_index] = k_pred
-        k_mse = mean_squared_error(k_y_vali, k_pred)
-        print(f'stacking mse error is {k_mse}')
 
         preds = gbm.predict(test_stack)
         preds_list.append(preds)
 
-    cv_mse_error = mean_squared_error(labels, stacking_oof)
+    fold_mse_error = mean_squared_error(labels, stacking_oof)
+    print(f'stacking fold mse error is {fold_mse_error}')
+
+    mse = make_scorer(mean_squared_error)
+    gbm = BayesianRidge()
+    cv_mse_error = cross_val_score(gbm, train_stack, labels, scoring=mse, cv=5, n_jobs=5)
+    cv_mse_error = np.mean(cv_mse_error)
     print(f'stacking cv mse error is {cv_mse_error}')
 
     preds_columns = ['preds_{id}'.format(id=i) for i in range(10)]
@@ -206,25 +221,22 @@ def get_selector():
 
 
 def model_main(model, selector=True, force=True):
-    lgb_params = {
-        'boosting_type': 'gbdt',
-        'num_leaves': 32,
-        'max_depth': -1,
-        'learning_rate': 0.01,
-        'max_bin': 425,
-        'objective': 'regression',
-        'min_child_samples': 30,
-        'subsample': 0.9,
-        'subsample_freq': 1,
-        'colsample_bytree': 0.9,
-        'reg_alpha': 0.1,
-        'seed': 2018,
-        'n_jobs': 5,
-        'verbose': -1
-    }
+    lgb_params = {'num_leaves': 120,
+                  'objective': 'regression',
+                  'max_depth': -1,
+                  'learning_rate': 0.05,
+                  "min_child_samples": 30,
+                  "boosting": "gbdt",
+                  'bagging_seed': 11,
+                  "colsample_bytree": 0.9,
+                  "subsample_freq": 1,
+                  "subsample": 0.9,
+                  "metric": 'mse',
+                  "lambda_l1": 0.1,
+                  "verbosity": -1}
 
     xgb_params = {
-        'eta': 0.01,
+        'eta': 0.05,
         'max_depth': 10,
         'max_bin': 425,
         'subsample': 0.8,
@@ -254,8 +266,8 @@ def model_main(model, selector=True, force=True):
     train_data = dataset[dataset['rate'] > 0.0]
     test_data = dataset[dataset['rate'] < 0.0]
 
-    train_data.reset_index(inplace=True)
-    test_data.reset_index(inplace=True)
+    train_data.reset_index(inplace=True, drop=True)
+    test_data.reset_index(inplace=True, drop=True)
 
     # # single model
     if model == 'lgb':
@@ -276,4 +288,4 @@ def model_main(model, selector=True, force=True):
 
 
 if __name__ == '__main__':
-    model_main(model='stacking', selector=True, force=True)
+    model_main(model='stacking', selector=True, force=False)

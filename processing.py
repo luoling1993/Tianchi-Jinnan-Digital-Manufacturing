@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 import datetime
 import os
 import re
 import warnings
-from functools import cmp_to_key
 
-import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
 
 warnings.filterwarnings(action='ignore')
 
@@ -19,7 +15,6 @@ ETLDATA_PATH = os.path.join(BASE_PATH, 'EtlData')
 
 time_columns = ['A5', 'A7', 'A9', 'A11', 'A14', 'A16', 'A24', 'A26', 'B5', 'B7']
 time_ts_columns = ['A20', 'A28', 'B4', 'B9', 'B10', 'B11']
-material_columns = ['A1', 'A2', 'A3', 'A4', 'A19', 'B1', 'B12', 'B14']
 
 
 class FuckProcessing(object):
@@ -41,11 +36,14 @@ class FuckProcessing(object):
 
     @staticmethod
     def _get_clean_time(item):
+        if item == -1:
+            return -1
+
         if not item:
-            return ''
+            return -1
 
         if pd.isnull(item):
-            return ''
+            return -1
 
         # specialized processing
         if item == '1900/1/29 0:00':
@@ -76,11 +74,14 @@ class FuckProcessing(object):
 
     @staticmethod
     def _get_clean_time_ts(item):
+        if item == -1:
+            return -1
+
         if not item:
-            return ''
+            return -1
 
         if pd.isnull(item):
-            return ''
+            return -1
 
         # specialized processing
         if item == '15:00-1600':
@@ -105,247 +106,76 @@ class FuckProcessing(object):
     @staticmethod
     def _get_clean_num(item):
         if not item:
-            return ''
+            return -1
 
         try:
             float(item)
             return item
         except ValueError:
-            return ''
-
-    def _clear_dataset(self, dataset):
-        # fucccccck data
-
-        dataset = dataset.copy()
-        dataset_columns = dataset.columns
-
-        # time clear
-        for column in time_columns:
-            if column not in dataset_columns:
-                continue
-            dataset[column] = dataset[column].apply(self._get_clean_time)
-
-        # time_ts clear
-        for column in time_ts_columns:
-            if column not in dataset_columns:
-                continue
-            dataset[column] = dataset[column].apply(self._get_clean_time_ts)
-
-        # num clear
-        num_columns = list()
-        for column in dataset.columns:
-            if column in ['sample_id', 'rate']:
-                continue
-
-            if column in time_columns:
-                continue
-
-            if column in time_ts_columns:
-                continue
-
-            num_columns.append(column)
-
-        for column in num_columns:
-            dataset[column] = dataset[column].apply(self._get_clean_num)
-
-        return dataset
-
-    @staticmethod
-    def _my_division(item):
-        item1 = item[0]
-        item2 = item[1]
-
-        if not item1:
-            return 0
-        if not item2:
             return -1
-
-        return float(item1) / float(item2)
-
-    def _get_operation_df(self, dataset):
-        dataset = dataset.copy()
-
-        # A22-A23 PH差
-        dataset['operation_ph'] = dataset[['A22', 'A23']].apply(lambda item: item[0] - item[1])
-
-        dataset['helper_sum'] = dataset['A1'] + dataset['A2'] + dataset['A2'] + dataset['A2']
-        # B14/(A1+A2+A3+A4)
-        dataset['B14_helper_sum_rate'] = dataset['B14'] / dataset['helper_sum']
-
-        # A1 A2 A3 A4占比
-        dataset['A1_helper_sum_rate'] = dataset['A1'] / dataset['helper_sum']
-        dataset['A2_helper_sum_rate'] = dataset['A2'] / dataset['helper_sum']
-        dataset['A3_helper_sum_rate'] = dataset['A3'] / dataset['helper_sum']
-        dataset['A4_helper_sum_rate'] = dataset['A4'] / dataset['helper_sum']
-
-        for index, column1 in enumerate(material_columns):
-            for column2 in material_columns[index + 1:]:
-                column_name = f'{column1}_division_{column2}'
-                dataset[column_name] = dataset[[column1, column2]].apply(self._my_division)
-        return dataset
 
     @staticmethod
     def _get_remove_columns(dataset):
         dataset = dataset.copy()
 
-        remove_columns = list()
-        length = dataset.shape[0]
+        dataset = dataset[dataset['rate'] > 0]  # 通过train_data筛选
 
+        remove_columns = ['B3', 'B13', 'A13', 'A18', 'A23']  # 单一类别
         for column in dataset.columns:
-            nunique = dataset[column].nunique()
-            if nunique <= 1:
-                remove_columns.append(column)
-                continue
-
-            null_rate = dataset[column].isnull().sum() / length
-            if null_rate >= 0.9:
-                remove_columns.append(column)
+            if column in remove_columns:
                 continue
 
             biggest_rate = dataset[column].value_counts(normalize=True, dropna=False).values[0]
-            if biggest_rate >= 0.95:
+            if biggest_rate >= 0.9:
                 remove_columns.append(column)
 
         return remove_columns
 
     @staticmethod
     def _time_to_num(time_str):
-        if not time_str:
+        if time_str == -1:
+            return -1
+
+        elif time_str == ':30:00':
+            return 0.5
+        elif time_str == '1900/1/9 7:00':
+            return 7
+        elif time_str == '1900/1/1 2:30':
+            return 2.5
+
+        try:
+            hours, minutes, seconds = time_str.split(':')
+        except ValueError:
+            return 0
+
+        try:
+            hours = int(hours)
+            minutes = int(minutes)
+            seconds = int(seconds)
+
+            time_num = hours + minutes / 60 + seconds / 3600
+            return round(time_num, 2)
+        except ValueError:
             return 0.5
 
-        time_pattern = re.compile('([0-9]{1,2}):([0-9]{1,2})')
-        match = time_pattern.search(time_str)
-
-        if match:
-            hours = match.group(1)
-            minute = match.group(2)
-
-            time_num = int(hours) + int(minute) / 60.0
-            return time_num
-        else:
-            raise ValueError()
-
-    def _get_time_duration(self, time_item, case=0):
-        ts_pattern = re.compile('([0-9]{1,2}:[0-9]{1,2})-([0-9]{1,2}:[0-9]{1,2})')
-
-        if case != 1:
-            time1, time2 = time_item[0], time_item[1]
-
-            if not time1 or not time2:
-                return ''
-        else:
-            time1 = time_item
-            time2 = None
-
-        if case == 0:
-            # time - time
-            time1, time2 = time_item[0], time_item[1]
-
-            if not time1 or not time2:
-                return ''
-        elif case == 1:
-            # time_ts
-            match = ts_pattern.search(time_item)
-            if match:
-                time1 = match.group(1)
-                time2 = match.group(2)
-            else:
-                return ''
-        elif case == 2:
-            # time_ts - time
-            if not time2:
-                return ''
-            match = ts_pattern.search(time1)
-            if match:
-                time1 = match.group(1)
-            else:
-                return ''
-        elif case == 3:
-            # time - time_ts
-            if not time2:
-                return ''
-            match = ts_pattern.search(time2)
-            if match:
-                time2 = match.group(2)
-            else:
-                return ''
-        elif case == 4:
-            # time_ts - time_ts
-            if not time2:
-                return ''
-
-            match1 = ts_pattern.search(time1)
-            if match1:
-                time1 = match1.group(1)
-            else:
-                return ''
-
-            match2 = ts_pattern.search(time2)
-            if match2:
-                time2 = match2.group(2)
-            else:
-                return ''
-
-        time1_num = self._time_to_num(time1)
-        time2_num = self._time_to_num(time2)
-
-        time_duration = time2_num - time1_num
-        if time_duration < 0.0:
-            time_duration += 24.0
-
-        return time_duration
-
     @staticmethod
-    def cmp(a, b):
-        pattern = re.compile('([A|B])([0-9]+)')
-
-        a_match = pattern.search(a)
-        a_1 = a_match.group(1)
-        a_2 = int(a_match.group(2))
-
-        b_match = pattern.search(b)
-        b_1 = b_match.group(1)
-        b_2 = int(b_match.group(2))
-
-        if a_1 < b_1:
+    def _get_time_duration(time_str):
+        if time_str == -1:
             return -1
-
-        if a_1 > b_1:
+        elif time_str == '19:-20:05':
+            return 1
+        elif time_str == '15:00-1600':
             return 1
 
-        if a_2 < b_2:
-            return -1
+        pattern = re.compile(r"\d+\.?\d*")
+        start_hour, start_minute, end_hour, end_minute = re.findall(pattern, time_str)
+        start_time = int(start_hour) + int(start_minute) / 60.0
+        end_time = int(end_hour) + int(end_minute) / 60.0
 
-        if a_2 > b_2:
-            return 1
-        return 0
-
-    def _sorted_columns(self):
-        sorted_columns = time_columns.copy()
-        sorted_columns.extend(time_ts_columns)
-
-        sorted_columns = sorted(sorted_columns, key=cmp_to_key(self.cmp))
-        return sorted_columns
-
-    @staticmethod
-    def _get_case_num(column1, column2):
-        if column1 in time_columns:
-            if column2 in time_columns:
-                case_num = 0
-            else:
-                case_num = 3
+        if start_time > end_time:
+            return round((end_time - start_time) + 24.0, 2)
         else:
-            if column2 in time_columns:
-                case_num = 2
-            else:
-                case_num = 4
-        return case_num
-
-    @staticmethod
-    def _get_mapping_mean(item, mapping_dict):
-        default_num = mapping_dict['avg_helper']
-
-        return mapping_dict.get(item, default_num)
+            return round((end_time - start_time), 2)
 
     @staticmethod
     def _get_sample_id(item):
@@ -356,6 +186,19 @@ class FuckProcessing(object):
             raise ValueError(f'error item:{item}')
         return sample_id
 
+    @staticmethod
+    def _get_operation_df(dataset):
+        dataset = dataset.copy()
+
+        dataset['helper_sum'] = (
+                dataset['A1'] + dataset['A3'] + dataset['A4'] + dataset['A19'] + dataset['B1'] + dataset['B12'])
+
+        # B14/(A1+A3+A4+A19+B1+B12)
+        dataset['B14_helper_sum_rate'] = dataset['B14'] / dataset['helper_sum']
+
+        dataset = dataset.drop(columns=['helper_sum'])
+        return dataset
+
     def _data_encoder(self, dataset):
         dataset = dataset.copy()
 
@@ -363,31 +206,35 @@ class FuckProcessing(object):
         remove_columns = ['sample_id', 'rate', 'id']
         cate_columns = [column for column in dataset.columns if column not in remove_columns]
 
-        label_encoder = LabelEncoder()
         for column in cate_columns:
-            dataset[column] = label_encoder.fit_transform(dataset[column].astype(np.str_))
+            mapping_dict = dict(zip(dataset[column].unique(), range(0, dataset[column].nunique())))
+            dataset[column] = dataset[column].map(mapping_dict)
 
         train_data = dataset[dataset['rate'] > 0.0]
 
         train_data['helper'] = pd.cut(train_data['rate'], 5, labels=False)
         train_data = pd.get_dummies(train_data, columns=['helper'])
-        helper_columns = [column for column in train_data.columns if 'helper' in column]
+        helper_columns = ['helper_0', 'helper_1', 'helper_2', 'helper_3', 'helper_4']
 
         # rate embedding + B14 embedding
+        # 神仙特征
+        b14_keys_length = train_data['B14'].nunique()
         for column in cate_columns:
+            column_keys_length = train_data[column].nunique()
+            if column_keys_length < b14_keys_length:
+                # 神仙逻辑:只考虑column的度>=B14列的度的情况
+                continue
+
             biggest_rate = train_data[column].value_counts(normalize=True, dropna=False).values[0]
             if biggest_rate > 0.9:
                 continue
 
             for helper_column in helper_columns:
-                helper_column_name = f'{column}_{helper_column}_mean'
                 b14_column_name = f'B14_{column}_{helper_column}_mean'
                 column_df = train_data.groupby(by=[column])[helper_column].agg('mean').reset_index(name='mean')
                 column_dict = column_df.set_index(column)['mean'].to_dict()
-                column_dict['avg_helper'] = np.nanmean(train_data[helper_column])
 
-                dataset[helper_column_name] = dataset[column].apply(self._get_mapping_mean, args=(column_dict,))
-                dataset[b14_column_name] = dataset['B14'].apply(self._get_mapping_mean, args=(column_dict,))
+                dataset[b14_column_name] = dataset['B14'].map(column_dict)
 
         # One-Hot encoding
         dataset = pd.get_dummies(dataset, columns=cate_columns)
@@ -400,56 +247,24 @@ class FuckProcessing(object):
         # 业务特征
         dataset = self._get_operation_df(dataset)
 
-        # remove_columns = self._get_remove_columns(dataset)
-        # dataset = dataset.drop(columns=remove_columns)
+        remove_columns = self._get_remove_columns(dataset)
+        dataset = dataset.drop(columns=remove_columns)
+        dataset = dataset.fillna(-1)
 
-        dataset = self._clear_dataset(dataset)
-
-        sorted_columns = self._sorted_columns()
-        length = len(sorted_columns)
         dataset_columns = dataset.columns
-
-        for index, column in enumerate(sorted_columns):
-            if column not in dataset_columns:
-                continue
-
+        for column in dataset_columns:
             if column in time_ts_columns:
                 # time_ts column
                 column_name = f'{column}_duration'
-                dataset[column_name] = dataset[column].apply(self._get_time_duration, args=(1,))
+                dataset[column_name] = dataset[column].apply(self._get_time_duration)
 
-            if length - index >= 2:
-                next_1_column = sorted_columns[index + 1]
+            if column in time_columns:
+                # time column
+                time_num_clumn_name = f'{column}_time_num'
+                dataset[time_num_clumn_name] = dataset[column].apply(self._time_to_num)
 
-                if next_1_column not in dataset_columns:
-                    continue
-
-                column_name = f'{column}_{next_1_column}_duration'
-
-                case_num = self._get_case_num(column, next_1_column)
-                dataset[column_name] = dataset[[column, next_1_column]].apply(self._get_time_duration,
-                                                                              args=(case_num,), axis=1)
-
-            if length - index >= 3:
-                next_2_column = sorted_columns[index + 2]
-
-                if next_2_column not in dataset_columns:
-                    continue
-
-                column_name = f'{column}_{next_2_column}_duration'
-
-                case_num = self._get_case_num(column, next_2_column)
-                dataset[column_name] = dataset[[column, next_2_column]].apply(self._get_time_duration,
-                                                                              args=(case_num,), axis=1)
-
-        for column in time_columns:
-            if column not in dataset_columns:
-                continue
-
-            time_num_clumn_name = f'{column}_time_num'
-            dataset[time_num_clumn_name] = dataset[column].apply(self._time_to_num)
-
-        dataset = dataset.drop(columns=sorted_columns, errors='ignore')
+        dataset = dataset.drop(columns=time_columns, errors='ignore')
+        dataset = dataset.drop(columns=time_ts_columns, errors='ignore')
         dataset = self._data_encoder(dataset)
 
         return dataset
